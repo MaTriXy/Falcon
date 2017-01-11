@@ -1,69 +1,49 @@
 package com.jraska.falcon.sample;
 
 import android.graphics.Bitmap;
-import android.support.test.InstrumentationRegistry;
+import android.support.test.rule.ActivityTestRule;
 import android.support.test.runner.AndroidJUnit4;
-import android.test.ActivityInstrumentationTestCase2;
+import android.view.View;
 import com.jraska.falcon.Falcon;
 import org.junit.After;
-import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import java.io.File;
 
-import static com.jraska.falcon.sample.matchers.BitmapFileMatcher.isBitmap;
-import static org.hamcrest.Matchers.greaterThan;
-import static org.hamcrest.Matchers.nullValue;
-import static org.hamcrest.core.IsNot.not;
-import static org.junit.Assert.assertThat;
+import static android.support.test.espresso.Espresso.onView;
+import static android.support.test.espresso.action.ViewActions.click;
+import static android.support.test.espresso.matcher.ViewMatchers.withId;
+import static com.jraska.falcon.sample.asserts.BitmapAssert.assertThatBitmap;
+import static com.jraska.falcon.sample.asserts.BitmapFileAssert.assertThatFile;
+import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * Shows usage of {@link Falcon} screenshots
- */
 @RunWith(AndroidJUnit4.class)
-public class FalconTest extends ActivityInstrumentationTestCase2<SampleActivity> {
+public class FalconTest {
   //region Constants
 
-  public static final int SMALLEST_SCREEN_EVER = 100;
+  static final int SMALLEST_SCREEN_EVER = 100;
 
   //endregion
 
   //region Fields
 
+  @Rule
+  public ActivityTestRule<SampleActivity> _activityRule = new ActivityTestRule<>(
+      SampleActivity.class);
+
   private File _screenshotFile;
-
-  //endregion
-
-  //region Constructors
-
-  public FalconTest() {
-    super(SampleActivity.class);
-  }
 
   //endregion
 
   //region Setup Methods
 
-  @Before
-  @Override
-  public void setUp() throws Exception {
-    super.setUp();
-
-    injectInstrumentation(InstrumentationRegistry.getInstrumentation());
-
-    getActivity();
-  }
-
-  @SuppressWarnings("ResultOfMethodCallIgnored")
   @After
-  @Override
-  public void tearDown() throws Exception {
+  public void after() throws Exception {
     if (_screenshotFile != null) {
-      _screenshotFile.delete();
+      assertThat(_screenshotFile.delete()).isTrue();
     }
-
-    super.tearDown();
   }
 
   //endregion
@@ -71,26 +51,70 @@ public class FalconTest extends ActivityInstrumentationTestCase2<SampleActivity>
   //region Test methods
 
   @Test
-  public void testTakeScreenshot() throws Exception {
-    File newFile = getActivity().getScreenshotFile();
+  public void takesScreenshotToFile() throws Exception {
+    SampleActivity activity = _activityRule.getActivity();
+    File newFile = activity.getScreenshotFile();
     _screenshotFile = newFile;
 
     //check that file does not exist yet
-    assertFalse(newFile.exists());
+    assertThat(newFile).doesNotExist();
 
-    Falcon.takeScreenshot(getActivity(), newFile);
+    Falcon.takeScreenshot(activity, newFile);
 
-    assertThat(newFile, isBitmap());
+    assertThatFile(newFile).isBitmap();
   }
 
   @Test
-  public void testTakeScreenshotBitmap() throws Exception {
-    Bitmap bitmap = Falcon.takeScreenshotBitmap(getActivity());
+  public void takesScreenshotToBitmap() throws Exception {
+    Bitmap bitmap = Falcon.takeScreenshotBitmap(_activityRule.getActivity());
 
-    assertThat(bitmap, not(nullValue()));
+    assertThat(bitmap).isNotNull();
 
-    assertThat(bitmap.getWidth(), greaterThan(SMALLEST_SCREEN_EVER));
-    assertThat(bitmap.getHeight(), greaterThan(SMALLEST_SCREEN_EVER));
+    assertThatBitmap(bitmap).hasWidthGreaterThan(SMALLEST_SCREEN_EVER);
+    assertThatBitmap(bitmap).hasHeightGreaterThan(SMALLEST_SCREEN_EVER);
+  }
+
+  @Test
+  public void takesCorrectScreenshotSize() {
+    SampleActivity activity = _activityRule.getActivity();
+    Bitmap bitmap = Falcon.takeScreenshotBitmap(activity);
+
+    View decorView = activity.getWindow().getDecorView();
+    assertThatBitmap(bitmap).hasWidth(decorView.getWidth());
+    assertThatBitmap(bitmap).hasHeight(decorView.getHeight());
+  }
+
+  @Test
+  public void takesToastIntoScreenshot() {
+    SampleActivity activity = _activityRule.getActivity();
+    Bitmap beforeToastBitmap = Falcon.takeScreenshotBitmap(activity);
+    onView(withId(R.id.show_toast)).perform(click());
+
+    Bitmap withToastBitmap = Falcon.takeScreenshotBitmap(activity);
+
+    assertThatBitmap(withToastBitmap).isDarkerThan(beforeToastBitmap);
+  }
+
+  @Test
+  public void takesDialogIntoScreenshot() {
+    SampleActivity activity = _activityRule.getActivity();
+    Bitmap beforeToastBitmap = Falcon.takeScreenshotBitmap(activity);
+    onView(withId(R.id.show_dialog)).perform(click());
+
+    Bitmap withToastBitmap = Falcon.takeScreenshotBitmap(activity);
+
+    assertThatBitmap(withToastBitmap).isDarkerThan(beforeToastBitmap);
+  }
+
+  @Test
+  public void takesPopupIntoScreenshot() {
+    SampleActivity activity = _activityRule.getActivity();
+    Bitmap beforePopupBitmap = Falcon.takeScreenshotBitmap(activity);
+    onView(withId(R.id.show_popup)).perform(click());
+
+    Bitmap withPopupBitmap = Falcon.takeScreenshotBitmap(activity);
+
+    assertThatBitmap(withPopupBitmap).isDifferentThan(beforePopupBitmap);
   }
 
   //endregion

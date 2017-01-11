@@ -1,5 +1,5 @@
 # Falcon
-**Take Android screenshots with Falcons bright eye!** 
+**Take Android screenshots with Falcons bright eye!**
 
 *Includes dialogs, toasts and all other extra windows in your screenshot.*
 
@@ -23,9 +23,9 @@ Check falcon-sample and its android tests for more example usage.
 
 ## Download
 
-Grab via Gradle: 
+Grab via Gradle:
 ```groovy
-compile 'com.jraska:falcon:0.3.1'
+compile 'com.jraska:falcon:1.0.3'
 ```
 
 ## Spoon Compat
@@ -37,20 +37,20 @@ To keep using Spoon with advantage of Falcon you can use `FalconSpoon` class.
 ```java
 // Screenshot with tag
 File screenshot = FalconSpoon.screenshot(activity, tag);
-// Screenshot with own test class and method name 
+// Screenshot with own test class and method name
 File screenshot = FalconSpoon.screenshot(activity, tag, testClassName, testMethodName);
 ```
 
 #### Gradle
 ```groovy
-androidTestCompile 'com.jraska:falcon-spoon-compat:0.3.1'
+androidTestCompile 'com.jraska:falcon-spoon-compat:1.0.3'
 ```
 
 ## Q&A
 
 *Why another screenshot library?*
 
-There are plenty of great screenshot libraries, but all of them miss Dialogs, Toasts and other extra windows in Activity. Not this one! 
+There are plenty of great screenshot libraries, but all of them miss Dialogs, Toasts and other extra windows in Activity. Not this one!
 
 
 ## License
@@ -70,4 +70,3 @@ There are plenty of great screenshot libraries, but all of them miss Dialogs, To
     limitations under the License.
 
   [Spoon]: https://github.com/square/spoon
-

@@ -1,61 +1,48 @@
 package com.jraska.falcon.sample;
 
-import android.support.test.InstrumentationRegistry;
+import android.support.test.rule.ActivityTestRule;
 import android.support.test.runner.AndroidJUnit4;
-import android.test.ActivityInstrumentationTestCase2;
 import com.jraska.falcon.FalconSpoon;
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import java.io.File;
 
-import static com.jraska.falcon.sample.matchers.BitmapFileMatcher.isBitmap;
-import static org.hamcrest.Matchers.greaterThan;
-import static org.junit.Assert.assertThat;
+import static com.jraska.falcon.sample.Assumptions.assumeSpoonPermissions;
+import static com.jraska.falcon.sample.asserts.BitmapFileAssert.assertThatFile;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Shows usage of {@link FalconSpoon} compat screenshots
  */
 @RunWith(AndroidJUnit4.class)
-public class FalconSpoonTest extends ActivityInstrumentationTestCase2<SampleActivity> {
+public class FalconSpoonTest {
+
   //region Fields
 
+  @Rule
+  public ActivityTestRule<SampleActivity> _activityRule = new ActivityTestRule<>(
+      SampleActivity.class);
+
   private File _screenshotFile;
-
-  //endregion
-
-
-  //region Constructors
-
-  public FalconSpoonTest() {
-    super(SampleActivity.class);
-  }
 
   //endregion
 
   //region Setup Methods
 
   @Before
-  @Override
-  public void setUp() throws Exception {
-    super.setUp();
-
-    injectInstrumentation(InstrumentationRegistry.getInstrumentation());
-
-    getActivity();
+  public void before() throws Exception {
+    assumeSpoonPermissions();
   }
 
-  @SuppressWarnings("ResultOfMethodCallIgnored")
   @After
-  @Override
-  public void tearDown() throws Exception {
+  public void after() throws Exception {
     if (_screenshotFile != null) {
-      _screenshotFile.delete();
+      assertThat(_screenshotFile.delete()).isTrue();
     }
-
-    super.tearDown();
   }
 
   //endregion
@@ -63,23 +50,23 @@ public class FalconSpoonTest extends ActivityInstrumentationTestCase2<SampleActi
   //region Test methods
 
   @Test
-  public void testTakeScreenshot() throws Exception {
+  public void takesScreenshotToFile() throws Exception {
     String tag = "ExampleScreenshot";
-    _screenshotFile = FalconSpoon.screenshot(getActivity(), tag);
+    _screenshotFile = FalconSpoon.screenshot(_activityRule.getActivity(), tag);
 
-    assertThat(_screenshotFile.length(), greaterThan(0L));
-    assertThat(_screenshotFile, isBitmap());
+    assertThat(_screenshotFile.length()).isGreaterThan(0L);
+    assertThatFile(_screenshotFile).isBitmap();
   }
 
   @Test
-  public void testTakeScreenshotWithCustomNames() throws Exception {
+  public void takesScreenshotToBitmap() throws Exception {
     String tag = "ExampleScreenshot";
 
-    _screenshotFile = FalconSpoon.screenshot(getActivity(), tag,
+    _screenshotFile = FalconSpoon.screenshot(_activityRule.getActivity(), tag,
         "FalconSpoonTest", "CustomMethodName");
 
-    assertThat(_screenshotFile.length(), greaterThan(0L));
-    assertThat(_screenshotFile, isBitmap());
+    assertThat(_screenshotFile.length()).isGreaterThan(0L);
+    assertThatFile(_screenshotFile).isBitmap();
   }
 
   //endregion

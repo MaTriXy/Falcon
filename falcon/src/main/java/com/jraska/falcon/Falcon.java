@@ -1,6 +1,9 @@
 package com.jraska.falcon;
 
 import android.app.Activity;
+import android.app.Application;
+import android.content.Context;
+import android.content.ContextWrapper;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Rect;
@@ -13,6 +16,7 @@ import android.view.WindowManager.LayoutParams;
 import java.io.*;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 
@@ -53,15 +57,13 @@ public final class Falcon {
     try {
       bitmap = takeBitmapUnchecked(activity);
       writeBitmap(bitmap, toFile);
-    }
-    catch (Exception e) {
+    } catch (Exception e) {
       String message = "Unable to take screenshot to file " + toFile.getAbsolutePath()
           + " of activity " + activity.getClass().getName();
 
       Log.e(TAG, message, e);
       throw new UnableToTakeScreenshotException(message, e);
-    }
-    finally {
+    } finally {
       if (bitmap != null) {
         bitmap.recycle();
       }
@@ -84,8 +86,7 @@ public final class Falcon {
 
     try {
       return takeBitmapUnchecked(activity);
-    }
-    catch (Exception e) {
+    } catch (Exception e) {
       String message = "Unable to take screenshot to bitmap of activity "
           + activity.getClass().getName();
 
@@ -94,16 +95,30 @@ public final class Falcon {
     }
   }
 
-
   //endregion
 
   //region Methods
 
   private static Bitmap takeBitmapUnchecked(Activity activity) throws InterruptedException {
     final List<ViewRootData> viewRoots = getRootViews(activity);
-    View main = activity.getWindow().getDecorView();
+    if (viewRoots.isEmpty()) {
+      throw new UnableToTakeScreenshotException("Unable to capture any view data in " + activity);
+    }
 
-    final Bitmap bitmap = Bitmap.createBitmap(main.getWidth(), main.getHeight(), ARGB_8888);
+    int maxWidth = Integer.MIN_VALUE;
+    int maxHeight = Integer.MIN_VALUE;
+
+    for (ViewRootData viewRoot : viewRoots) {
+      if (viewRoot._winFrame.right > maxWidth) {
+        maxWidth = viewRoot._winFrame.right;
+      }
+
+      if (viewRoot._winFrame.bottom > maxHeight) {
+        maxHeight = viewRoot._winFrame.bottom;
+      }
+    }
+
+    final Bitmap bitmap = Bitmap.createBitmap(maxWidth, maxHeight, ARGB_8888);
 
     // We need to do it in main thread
     if (Looper.myLooper() == Looper.getMainLooper()) {
@@ -115,8 +130,7 @@ public final class Falcon {
         public void run() {
           try {
             drawRootsToBitmap(viewRoots, bitmap);
-          }
-          finally {
+          } finally {
             latch.countDown();
           }
         }
@@ -153,10 +167,17 @@ public final class Falcon {
     try {
       outputStream = new BufferedOutputStream(new FileOutputStream(toFile));
       bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream);
+    } finally {
+      closeQuietly(outputStream);
     }
-    finally {
-      if (outputStream != null) {
-        outputStream.close();
+  }
+
+  private static void closeQuietly(Closeable closable) {
+    if (closable != null) {
+      try {
+        closable.close();
+      } catch (IOException e) {
+        // Do nothing
       }
     }
   }
@@ -166,7 +187,7 @@ public final class Falcon {
     List<ViewRootData> rootViews = new ArrayList<>();
 
     Object globalWindowManager;
-    if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.ICE_CREAM_SANDWICH_MR1) {
+    if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.JELLY_BEAN) {
       globalWindowManager = getFieldValue("mWindowManager", activity.getWindowManager());
     } else {
       globalWindowManager = getFieldValue("mGlobal", activity.getWindowManager());
@@ -191,6 +212,14 @@ public final class Falcon {
     for (int i = 0; i < roots.length; i++) {
       Object root = roots[i];
 
+      View view = (View) getFieldValue("mView", root);
+
+      // fixes https://github.com/jraska/Falcon/issues/10
+      if (view == null) {
+        Log.e(TAG, "null View stored as root in Global window manager, skipping");
+        continue;
+      }
+
       Object attachInfo = getFieldValue("mAttachInfo", root);
       int top = (int) getFieldValue("mWindowTop", attachInfo);
       int left = (int) getFieldValue("mWindowLeft", attachInfo);
@@ -198,19 +227,92 @@ public final class Falcon {
       Rect winFrame = (Rect) getFieldValue("mWinFrame", root);
       Rect area = new Rect(left, top, left + winFrame.width(), top + winFrame.height());
 
-      View view = (View) getFieldValue("mView", root);
       rootViews.add(new ViewRootData(view, area, params[i]));
     }
 
+    if (rootViews.isEmpty()) {
+      return Collections.emptyList();
+    }
+
+    offsetRootsTopLeft(rootViews);
+    ensureDialogsAreAfterItsParentActivities(rootViews);
+
     return rootViews;
+  }
+
+  private static void offsetRootsTopLeft(List<ViewRootData> rootViews) {
+    int minTop = Integer.MAX_VALUE;
+    int minLeft = Integer.MAX_VALUE;
+    for (ViewRootData rootView : rootViews) {
+      if (rootView._winFrame.top < minTop) {
+        minTop = rootView._winFrame.top;
+      }
+
+      if (rootView._winFrame.left < minLeft) {
+        minLeft = rootView._winFrame.left;
+      }
+    }
+
+    for (ViewRootData rootView : rootViews) {
+      rootView._winFrame.offset(-minLeft, -minTop);
+    }
+  }
+
+  // This fixes issue #11. It is not perfect solution and maybe there is another case
+  // of different type of view, but it works for most common case of dialogs.
+  private static void ensureDialogsAreAfterItsParentActivities(List<ViewRootData> viewRoots) {
+    if (viewRoots.size() <= 1) {
+      return;
+    }
+
+    for (int dialogIndex = 0; dialogIndex < viewRoots.size() - 1; dialogIndex++) {
+      ViewRootData viewRoot = viewRoots.get(dialogIndex);
+      if (!viewRoot.isDialogType()) {
+        continue;
+      }
+
+      Activity dialogOwnerActivity = ownerActivity(viewRoot.context());
+      if (dialogOwnerActivity == null) {
+        // make sure we will never compare null == null
+        return;
+      }
+
+      for (int parentIndex = dialogIndex + 1; parentIndex < viewRoots.size(); parentIndex++) {
+        ViewRootData possibleParent = viewRoots.get(parentIndex);
+        if (possibleParent.isActivityType()
+            && ownerActivity(possibleParent.context()) == dialogOwnerActivity) {
+          viewRoots.remove(possibleParent);
+          viewRoots.add(dialogIndex, possibleParent);
+
+          break;
+        }
+      }
+    }
+  }
+
+  private static Activity ownerActivity(Context context) {
+    Context currentContext = context;
+
+    while (currentContext != null) {
+      if (currentContext instanceof Activity) {
+        return (Activity) currentContext;
+      }
+
+      if (currentContext instanceof ContextWrapper && !(currentContext instanceof Application)) {
+        currentContext = ((ContextWrapper) currentContext).getBaseContext();
+      } else {
+        break;
+      }
+    }
+
+    return null;
   }
 
   private static Object getFieldValue(String fieldName, Object target) {
     try {
       return getFieldValueUnchecked(fieldName, target);
-    }
-    catch (Exception e) {
-      throw new RuntimeException(e);
+    } catch (Exception e) {
+      throw new UnableToTakeScreenshotException(e);
     }
   }
 
@@ -254,8 +356,28 @@ public final class Falcon {
    * screenshot capturing to enable better client code exception handling.
    */
   public static class UnableToTakeScreenshotException extends RuntimeException {
-    private UnableToTakeScreenshotException(String detailMessage, Throwable throwable) {
-      super(detailMessage, throwable);
+    private UnableToTakeScreenshotException(String detailMessage) {
+      super(detailMessage);
+    }
+
+    private UnableToTakeScreenshotException(String detailMessage, Exception exception) {
+      super(detailMessage, extractException(exception));
+    }
+
+    private UnableToTakeScreenshotException(Exception ex) {
+      super(extractException(ex));
+    }
+
+    /**
+     * Method to avoid multiple wrapping. If there is already our exception,
+     * just wrap the cause again
+     */
+    private static Throwable extractException(Exception ex) {
+      if (ex instanceof UnableToTakeScreenshotException) {
+        return ex.getCause();
+      }
+
+      return ex;
     }
   }
 
@@ -264,10 +386,22 @@ public final class Falcon {
     private final Rect _winFrame;
     private final LayoutParams _layoutParams;
 
-    public ViewRootData(View view, Rect winFrame, LayoutParams layoutParams) {
+    ViewRootData(View view, Rect winFrame, LayoutParams layoutParams) {
       _view = view;
       _winFrame = winFrame;
       _layoutParams = layoutParams;
+    }
+
+    boolean isDialogType() {
+      return _layoutParams.type == LayoutParams.TYPE_APPLICATION;
+    }
+
+    boolean isActivityType() {
+      return _layoutParams.type == LayoutParams.TYPE_BASE_APPLICATION;
+    }
+
+    Context context() {
+      return _view.getContext();
     }
   }
 
