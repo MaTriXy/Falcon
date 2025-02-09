@@ -8,6 +8,7 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Rect;
 import android.os.Build;
+import android.os.IBinder;
 import android.os.Looper;
 import android.util.Log;
 import android.view.View;
@@ -19,6 +20,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static android.graphics.Bitmap.Config.ARGB_8888;
 import static android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND;
@@ -124,22 +126,35 @@ public final class Falcon {
     if (Looper.myLooper() == Looper.getMainLooper()) {
       drawRootsToBitmap(viewRoots, bitmap);
     } else {
-      final CountDownLatch latch = new CountDownLatch(1);
-      activity.runOnUiThread(new Runnable() {
-        @Override
-        public void run() {
-          try {
-            drawRootsToBitmap(viewRoots, bitmap);
-          } finally {
-            latch.countDown();
-          }
-        }
-      });
-
-      latch.await();
+      drawRootsToBitmapOtherThread(activity, viewRoots, bitmap);
     }
 
     return bitmap;
+  }
+
+  private static void drawRootsToBitmapOtherThread(Activity activity, final List<ViewRootData> viewRoots,
+                                                   final Bitmap bitmap) throws InterruptedException {
+    final AtomicReference<Exception> errorInMainThread = new AtomicReference<>();
+    final CountDownLatch latch = new CountDownLatch(1);
+    activity.runOnUiThread(new Runnable() {
+      @Override
+      public void run() {
+        try {
+          drawRootsToBitmap(viewRoots, bitmap);
+        } catch (Exception ex) {
+          errorInMainThread.set(ex);
+        } finally {
+          latch.countDown();
+        }
+      }
+    });
+
+    latch.await();
+
+    Exception exception = errorInMainThread.get();
+    if(exception != null){
+      throw new UnableToTakeScreenshotException(exception);
+    }
   }
 
   private static void drawRootsToBitmap(List<ViewRootData> viewRoots, Bitmap bitmap) {
@@ -183,7 +198,7 @@ public final class Falcon {
   }
 
   @SuppressWarnings("unchecked") // no way to check
-  private static List<ViewRootData> getRootViews(Activity activity) {
+  static List<ViewRootData> getRootViews(Activity activity) {
     Object globalWindowManager;
     if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.JELLY_BEAN) {
       globalWindowManager = getFieldValue("mWindowManager", activity.getWindowManager());
@@ -223,26 +238,26 @@ public final class Falcon {
     for (int i = 0; i < roots.length; i++) {
       Object root = roots[i];
 
-      View view = (View) getFieldValue("mView", root);
+      View rootView = (View) getFieldValue("mView", root);
 
       // fixes https://github.com/jraska/Falcon/issues/10
-      if (view == null) {
+      if (rootView == null) {
         Log.e(TAG, "null View stored as root in Global window manager, skipping");
         continue;
       }
 
-      if(!view.isShown()){
+      if(!rootView.isShown()){
         continue;
       }
 
-      Object attachInfo = getFieldValue("mAttachInfo", root);
-      int top = (int) getFieldValue("mWindowTop", attachInfo);
-      int left = (int) getFieldValue("mWindowLeft", attachInfo);
+      int[] location = new int[2];
+      rootView.getLocationOnScreen(location);
 
-      Rect winFrame = (Rect) getFieldValue("mWinFrame", root);
-      Rect area = new Rect(left, top, left + winFrame.width(), top + winFrame.height());
+      int left = location[0];
+      int top = location[1];
+      Rect area = new Rect(left, top, left + rootView.getWidth(), top + rootView.getHeight());
 
-      rootViews.add(new ViewRootData(view, area, params[i]));
+      rootViews.add(new ViewRootData(rootView, area, params[i]));
     }
 
     return rootViews;
@@ -279,8 +294,7 @@ public final class Falcon {
         continue;
       }
 
-      Activity dialogOwnerActivity = ownerActivity(viewRoot.context());
-      if (dialogOwnerActivity == null) {
+      if (viewRoot.getWindowToken() == null) {
         // make sure we will never compare null == null
         return;
       }
@@ -288,7 +302,7 @@ public final class Falcon {
       for (int parentIndex = dialogIndex + 1; parentIndex < viewRoots.size(); parentIndex++) {
         ViewRootData possibleParent = viewRoots.get(parentIndex);
         if (possibleParent.isActivityType()
-            && ownerActivity(possibleParent.context()) == dialogOwnerActivity) {
+            && possibleParent.getWindowToken() == viewRoot.getWindowToken()) {
           viewRoots.remove(possibleParent);
           viewRoots.add(dialogIndex, possibleParent);
 
@@ -296,24 +310,6 @@ public final class Falcon {
         }
       }
     }
-  }
-
-  private static Activity ownerActivity(Context context) {
-    Context currentContext = context;
-
-    while (currentContext != null) {
-      if (currentContext instanceof Activity) {
-        return (Activity) currentContext;
-      }
-
-      if (currentContext instanceof ContextWrapper && !(currentContext instanceof Application)) {
-        currentContext = ((ContextWrapper) currentContext).getBaseContext();
-      } else {
-        break;
-      }
-    }
-
-    return null;
   }
 
   private static Object getFieldValue(String fieldName, Object target) {
@@ -332,7 +328,7 @@ public final class Falcon {
     return field.get(target);
   }
 
-  private static Field findField(String name, Class clazz) throws NoSuchFieldException {
+  static Field findField(String name, Class clazz) throws NoSuchFieldException {
     Class currentClass = clazz;
     while (currentClass != Object.class) {
       for (Field field : currentClass.getDeclaredFields()) {
@@ -389,8 +385,8 @@ public final class Falcon {
     }
   }
 
-  private static class ViewRootData {
-    private final View _view;
+  static class ViewRootData {
+    final View _view;
     private final Rect _winFrame;
     private final LayoutParams _layoutParams;
 
@@ -406,6 +402,10 @@ public final class Falcon {
 
     boolean isActivityType() {
       return _layoutParams.type == LayoutParams.TYPE_BASE_APPLICATION;
+    }
+
+    IBinder getWindowToken() {
+      return _layoutParams.token;
     }
 
     Context context() {

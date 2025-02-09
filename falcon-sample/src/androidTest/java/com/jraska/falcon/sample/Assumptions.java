@@ -4,7 +4,6 @@ import android.os.Build;
 import org.junit.Assume;
 
 import static org.hamcrest.Matchers.is;
-import static org.hamcrest.Matchers.lessThan;
 
 public final class Assumptions {
   public static void assumeNoCI() {
@@ -15,10 +14,4 @@ public final class Assumptions {
     return BuildConfig.CI_BUILD;
   }
 
-  public static void assumeSpoonPermissions() {
-    // TODO: 28/07/16 PULL WELCOME: grant permissions to test application on API 21+
-    Assume.assumeThat("Spoon cannot take screenshots on API 21+" +
-            " without granted WRITE_EXTERNAL_STORAGE permission",
-        Build.VERSION.SDK_INT, lessThan(Build.VERSION_CODES.LOLLIPOP));
-  }
 }

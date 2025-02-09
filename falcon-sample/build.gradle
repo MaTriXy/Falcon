@@ -2,20 +2,17 @@ import com.android.ddmlib.DdmPreferences
 
 buildscript {
   repositories {
-    jcenter()
+    mavenCentral()
   }
 
   dependencies {
-    classpath 'com.neenbedankt.gradle.plugins:android-apt:1.8'
   }
 }
 
 apply plugin: 'com.android.application'
-apply plugin: 'com.neenbedankt.android-apt'
 
 android {
   compileSdkVersion rootProject.ext.compileSdkVersion
-  buildToolsVersion rootProject.ext.buildToolsVersion
 
   defaultConfig {
     applicationId "com.jraska.falcon.sample"
@@ -53,26 +50,29 @@ android {
     abortOnError true
   }
 
+  adbOptions {
+    installOptions "-g"
+  }
+
   defaultConfig {
     testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
   }
 }
 
 dependencies {
-  compile project(':falcon')
+  implementation project(':falcon')
 
-  compile 'com.android.support:appcompat-v7:24.1.1'
-  compile 'com.android.support:design:24.1.1'
-  compile 'com.jakewharton:butterknife:8.2.1'
-  apt 'com.jakewharton:butterknife-compiler:8.2.1'
+  implementation 'com.android.support:appcompat-v7:27.1.1'
+  implementation 'com.android.support:design:27.1.1'
+  implementation 'com.jakewharton:butterknife:8.8.1'
+  annotationProcessor 'com.jakewharton:butterknife-compiler:8.8.1'
 
-
-  androidTestCompile project(':falcon-spoon-compat')
-  androidTestCompile 'org.assertj:assertj-core:1.7.1'
-  androidTestCompile 'com.android.support.test:runner:0.5'
-  androidTestCompile 'com.android.support.test:rules:0.5'
-  androidTestCompile 'com.android.support.test.espresso:espresso-core:2.2.2'
+  //noinspection GradleDependency - 3 cannot be compiled due to JVM 8 instructions
+  androidTestImplementation 'org.assertj:assertj-core:2.9.0'
+  androidTestImplementation 'com.android.support.test:runner:1.0.2'
+  androidTestImplementation 'com.android.support.test:rules:1.0.2'
+  androidTestImplementation 'com.android.support.test.espresso:espresso-core:3.0.2'
 
   // separately set because of test runners older dependencies
-  androidTestCompile 'com.android.support:support-annotations:24.1.1'
+  androidTestImplementation 'com.android.support:support-annotations:27.1.1'
 }
